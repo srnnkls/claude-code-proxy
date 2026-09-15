@@ -34,12 +34,20 @@ Legacy IDs such as `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` remain
       "deepseek-flash",
       "deepseek-v4-pro",
       "deepseek-v4-flash"
-    ]
+    ],
+    "aliases": {
+      "deepseek-flash": "deepseek-flash",
+      "deepseek-v4-pro": "deepseek-v4-pro",
+      "deepseek-v4-flash": "deepseek-v4-flash",
+      "ds-flash": "deepseek-flash",
+      "ds-v4-pro": "deepseek-v4-pro",
+      "ds-v4-flash": "deepseek-v4-flash"
+    }
   }
 }
 ```
 
-Configured entries are upstream IDs without the `deepseek/` routing prefix.
+Configured `models` entries are upstream IDs without the `deepseek/` routing prefix. Each `aliases` entry maps a local model name to one of those configured upstream IDs; aliases whose target is absent from `models` are not advertised. A self-mapping such as `"deepseek-flash": "deepseek-flash"` claims that bare ID for native DeepSeek, while `opencode-go/deepseek-flash` remains available for the gateway. With the example above, `claude --model ds-flash` also sends `deepseek-flash` to the native endpoint.
 
 ```sh
 ANTHROPIC_MODEL=deepseek/deepseek-v4-pro \
@@ -66,3 +74,4 @@ DeepSeek documents these Messages API differences:
 - `CCP_DEEPSEEK_API_KEY`, `DEEPSEEK_API_KEY`, or `deepseek.apiKey` supplies the key.
 - `CCP_DEEPSEEK_BASE_URL` or `deepseek.baseUrl` changes the API base URL.
 - `deepseek.models` replaces the default advertised model list.
+- `deepseek.aliases` maps local model IDs to configured upstream model IDs.
