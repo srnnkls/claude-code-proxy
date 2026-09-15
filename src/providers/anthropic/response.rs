@@ -124,7 +124,7 @@ fn observe_value(value: &Value, ctx: &RequestContext, outcome: &ResponseOutcome)
     }
 }
 
-pub(super) fn relay(upstream: reqwest::Response, ctx: RequestContext) -> Response {
+pub(crate) fn relay(upstream: reqwest::Response, ctx: RequestContext) -> Response {
     let observation = Observation::for_headers(upstream.headers());
     let outcome = ResponseOutcome::default();
     let response = http::Response::builder().status(upstream.status());
