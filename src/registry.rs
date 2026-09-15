@@ -92,6 +92,7 @@ impl Registry {
             "opencode".into(),
             crate::providers::opencode::advertised_models(),
         );
+        remove_shadowed_models(&mut models);
 
         let mut handlers = BTreeMap::new();
         for (name, entries) in &models {
@@ -339,6 +340,13 @@ const DEEPSEEK_CLI: PlaceholderCli = PlaceholderCli {
 };
 const GROK_CLI: PlaceholderCli = PlaceholderCli { provider: "grok" };
 
+fn remove_shadowed_models(models: &mut BTreeMap<String, Vec<String>>) {
+    let mut claimed = HashSet::new();
+    for entries in models.values_mut() {
+        entries.retain(|model| claimed.insert(model.clone()));
+    }
+}
+
 fn expand_codex_models() -> Vec<String> {
     let mut set = HashSet::new();
     let mut out = Vec::new();
@@ -547,6 +555,7 @@ mod tests {
                 "opencode-go/deepseek-v4-pro".to_string(),
             ],
         );
+        remove_shadowed_models(&mut registry.models);
         for model in ["deepseek-flash", "deepseek-v4-pro"] {
             assert_eq!(
                 registry.provider_for_model(model, None).unwrap().name(),
@@ -567,5 +576,41 @@ mod tests {
                 "opencode"
             );
         }
+    }
+
+    #[test]
+    fn deepseek_aliases_can_claim_bare_ids_without_removing_opencode_overrides() {
+        let mut registry = Registry::new(AliasProvider::Codex);
+        registry.models.insert(
+            "deepseek".to_string(),
+            vec!["deepseek-flash".to_string(), "ds-flash".to_string()],
+        );
+        remove_shadowed_models(&mut registry.models);
+        assert_eq!(
+            registry
+                .provider_for_model("deepseek-flash", None)
+                .unwrap()
+                .name(),
+            "deepseek"
+        );
+        assert_eq!(
+            registry
+                .provider_for_model("ds-flash", None)
+                .unwrap()
+                .name(),
+            "deepseek"
+        );
+        assert_eq!(
+            registry
+                .provider_for_model("opencode-go/deepseek-flash", None)
+                .unwrap()
+                .name(),
+            "opencode"
+        );
+        assert!(
+            !registry
+                .supported_models_for("opencode")
+                .contains(&"deepseek-flash".to_string())
+        );
     }
 }

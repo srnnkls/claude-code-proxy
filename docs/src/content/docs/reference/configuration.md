@@ -42,7 +42,13 @@ These settings configure the proxy process. Claude Code client settings such as 
   "deepseek": {
     "apiKey": "YOUR_DEEPSEEK_API_KEY",
     "baseUrl": "https://api.deepseek.com/anthropic",
-    "models": ["deepseek-flash", "deepseek-v4-pro"]
+    "models": ["deepseek-flash", "deepseek-v4-pro"],
+    "aliases": {
+      "deepseek-flash": "deepseek-flash",
+      "deepseek-v4-pro": "deepseek-v4-pro",
+      "ds-flash": "deepseek-flash",
+      "ds-v4-pro": "deepseek-v4-pro"
+    }
   },
   "opencode": {
     "apiKey": "YOUR_OPENCODE_GO_API_KEY",
@@ -149,6 +155,7 @@ Proxy URLs may use `http`, `https`, `socks4`, `socks4a`, `socks5`, or `socks5h`.
 | `DEEPSEEK_API_KEY` | `deepseek.apiKey` | unset | Fallback API-key variable accepted when the CCP-specific variable is unset. |
 | `CCP_DEEPSEEK_BASE_URL` | `deepseek.baseUrl` | `https://api.deepseek.com/anthropic` | Changes the DeepSeek Anthropic-compatible API base URL. |
 | none | `deepseek.models` | `deepseek-flash`, `deepseek-v4-pro` | Replaces the upstream IDs advertised under the `deepseek/` prefix. |
+| none | `deepseek.aliases` | empty | Maps local model IDs to entries in `deepseek.models`. |
 
 ## OpenCode Go
 

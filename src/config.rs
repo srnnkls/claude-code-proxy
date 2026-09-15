@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -124,6 +124,7 @@ struct DeepSeekConfig {
     #[serde(rename = "baseUrl")]
     pub base_url: Option<String>,
     pub models: Option<Vec<String>>,
+    pub aliases: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -376,6 +377,9 @@ pub fn config_override_summary_lines(cfg: &LoadedConfig) -> Vec<String> {
             if deepseek.models.is_some_and(|models| !models.is_empty()) {
                 out.push("deepseek.models (config)".to_string());
             }
+            if deepseek.aliases.is_some_and(|aliases| !aliases.is_empty()) {
+                out.push("deepseek.aliases (config)".to_string());
+            }
         }
         if let Some(codex) = file_cfg.codex {
             if codex
@@ -610,6 +614,7 @@ struct ResolvedDeepSeekConfig {
     api_key_source: Option<&'static str>,
     base_url: String,
     models: Vec<String>,
+    aliases: BTreeMap<String, String>,
 }
 
 fn resolve_deepseek_config(
@@ -648,7 +653,8 @@ fn resolve_deepseek_config(
         })
         .unwrap_or_else(|| "https://api.deepseek.com/anthropic".to_string());
     let models = file
-        .and_then(|config| config.models)
+        .as_ref()
+        .and_then(|config| config.models.clone())
         .unwrap_or_default()
         .into_iter()
         .filter(|model| !model.is_empty())
@@ -661,12 +667,20 @@ fn resolve_deepseek_config(
     } else {
         models
     };
+    let aliases = file
+        .as_ref()
+        .and_then(|config| config.aliases.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(alias, target)| !alias.is_empty() && !target.is_empty())
+        .collect();
 
     ResolvedDeepSeekConfig {
         api_key,
         api_key_source,
         base_url,
         models,
+        aliases,
     }
 }
 
@@ -688,6 +702,11 @@ pub fn deepseek_base_url() -> String {
 pub fn deepseek_models() -> Vec<String> {
     let env: HashMap<_, _> = std::env::vars().collect();
     resolve_deepseek_config(&env, &paths::config_dir()).models
+}
+
+pub fn deepseek_aliases() -> BTreeMap<String, String> {
+    let env: HashMap<_, _> = std::env::vars().collect();
+    resolve_deepseek_config(&env, &paths::config_dir()).aliases
 }
 
 pub fn is_verbose() -> bool {
@@ -1147,7 +1166,7 @@ mod tests {
         let config = tempfile::TempDir::new().unwrap();
         std::fs::write(
             config.path().join("config.json"),
-            r#"{"deepseek":{"apiKey":"file-key","baseUrl":"https://file.example/anthropic","models":["deepseek-custom"]}}"#,
+            r#"{"deepseek":{"apiKey":"file-key","baseUrl":"https://file.example/anthropic","models":["deepseek-custom"],"aliases":{"ds-custom":"deepseek-custom"}}}"#,
         )
         .unwrap();
         let mut env = HashMap::new();
@@ -1156,6 +1175,10 @@ mod tests {
         assert_eq!(resolved.api_key_source, Some("config.json"));
         assert_eq!(resolved.base_url, "https://file.example/anthropic");
         assert_eq!(resolved.models, ["deepseek-custom"]);
+        assert_eq!(
+            resolved.aliases.get("ds-custom").map(String::as_str),
+            Some("deepseek-custom")
+        );
 
         env.insert("DEEPSEEK_API_KEY".into(), "standard-key".into());
         let resolved = resolve_deepseek_config(&env, config.path());
@@ -1179,6 +1202,7 @@ mod tests {
         let resolved = resolve_deepseek_config(&HashMap::new(), config.path());
         assert_eq!(resolved.base_url, "https://api.deepseek.com/anthropic");
         assert_eq!(resolved.models, ["deepseek-flash", "deepseek-v4-pro"]);
+        assert!(resolved.aliases.is_empty());
     }
 
     #[test]
