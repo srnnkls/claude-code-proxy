@@ -2,6 +2,10 @@ mod headers;
 mod request;
 mod response;
 
+pub(crate) use headers::forwarded_headers;
+pub(crate) use request::prepare_body_preserving_unsigned_thinking;
+pub(crate) use response::relay as relay_response;
+
 use std::time::Duration;
 
 use async_trait::async_trait;

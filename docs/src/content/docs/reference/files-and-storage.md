@@ -35,9 +35,10 @@ When `CCP_CONFIG_DIR` is set, file-backed provider credentials use
 `CCP_CURSOR_AUTH_TOKEN` bypasses Cursor's local credential store for that
 process.
 
-OpenCode Go is the exception: it reads its API key from
-`CCP_OPENCODE_API_KEY`, `OPENCODE_API_KEY`, or `opencode.apiKey` in
-`config.json` and does not create a provider auth store.
+OpenCode Go and DeepSeek use configured API keys instead of provider auth stores.
+OpenCode Go reads `CCP_OPENCODE_API_KEY`, `OPENCODE_API_KEY`, or
+`opencode.apiKey`; DeepSeek reads `CCP_DEEPSEEK_API_KEY`, `DEEPSEEK_API_KEY`,
+or `deepseek.apiKey` in `config.json`.
 
 The proxy owns these credentials independently of native Codex, Grok, and Cursor Agent stores.
 

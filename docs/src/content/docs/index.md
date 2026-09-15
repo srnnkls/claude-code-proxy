@@ -1,10 +1,10 @@
 ---
 title: What is claude-code-proxy?
-description: Run Claude Code with Codex, Kimi, Grok, OpenCode Go, or Cursor Agent through one local Anthropic-compatible proxy.
+description: Run Claude Code with Codex, DeepSeek, Kimi, Grok, OpenCode Go, or Cursor Agent through one local Anthropic-compatible proxy.
 ---
 
 <div class="hero-copy">
-claude-code-proxy lets you use Claude Code with Codex, Kimi, Grok, OpenCode Go, or Cursor Agent. Start one local app, choose a model, and keep working in the Claude Code interface you already know.
+claude-code-proxy lets you use Claude Code with Codex, DeepSeek, Kimi, Grok, OpenCode Go, or Cursor Agent. Start one local app, choose a model, and keep working in the Claude Code interface you already know.
 </div>
 
 <div class="route-rail" aria-label="Claude Code connects through the proxy to a supported provider">
@@ -21,7 +21,7 @@ claude-code-proxy lets you use Claude Code with Codex, Kimi, Grok, OpenCode Go, 
   <div class="route-connector" aria-hidden="true"><span>→</span></div>
   <div class="route-node route-providers">
     <span class="route-kicker">Supported providers</span>
-    <div class="provider-stack"><span>Codex</span><span>Kimi</span><span>Grok</span><span>OpenCode Go</span><span>Cursor Agent</span></div>
+    <div class="provider-stack"><span>Codex</span><span>DeepSeek</span><span>Kimi</span><span>Grok</span><span>OpenCode Go</span><span>Cursor Agent</span></div>
   </div>
 </div>
 

@@ -78,6 +78,10 @@ impl Registry {
         );
         models.insert("cursor".into(), build_cursor_models());
         models.insert(
+            "deepseek".into(),
+            crate::providers::deepseek::model::advertised_models(),
+        );
+        models.insert(
             "grok".into(),
             GROK_MODELS
                 .iter()
@@ -96,6 +100,7 @@ impl Registry {
                 "codex" => Arc::new(crate::providers::codex::CodexProvider::new()),
                 "kimi" => Arc::new(crate::providers::kimi::KimiProvider::new()),
                 "cursor" => Arc::new(crate::providers::cursor::CursorProvider::new()),
+                "deepseek" => Arc::new(crate::providers::deepseek::DeepSeekProvider::new()),
                 "grok" => Arc::new(crate::providers::grok::GrokProvider::new()),
                 "opencode" => Arc::new(crate::providers::opencode::OpenCodeProvider::new()),
                 _ => Arc::new(PlaceholderProvider::new(name, entries.clone())),
@@ -246,6 +251,7 @@ impl PlaceholderProvider {
             "codex" => "codex",
             "kimi" => "kimi",
             "cursor" => "cursor",
+            "deepseek" => "deepseek",
             "grok" => "grok",
             _ => "codex",
         };
@@ -268,6 +274,7 @@ impl Provider for PlaceholderProvider {
             "codex" => &CODEX_CLI,
             "kimi" => &KIMI_CLI,
             "cursor" => &CURSOR_CLI,
+            "deepseek" => &DEEPSEEK_CLI,
             "grok" => &GROK_CLI,
             _ => &CODEX_CLI,
         }
@@ -327,7 +334,11 @@ impl CliHandlers for PlaceholderCli {
 const CODEX_CLI: PlaceholderCli = PlaceholderCli { provider: "codex" };
 const KIMI_CLI: PlaceholderCli = PlaceholderCli { provider: "kimi" };
 const CURSOR_CLI: PlaceholderCli = PlaceholderCli { provider: "cursor" };
+const DEEPSEEK_CLI: PlaceholderCli = PlaceholderCli {
+    provider: "deepseek",
+};
 const GROK_CLI: PlaceholderCli = PlaceholderCli { provider: "grok" };
+
 fn expand_codex_models() -> Vec<String> {
     let mut set = HashSet::new();
     let mut out = Vec::new();
@@ -506,6 +517,47 @@ mod tests {
             assert_eq!(
                 registry.provider_for_model(model, None).unwrap().name(),
                 owner
+            );
+            assert_eq!(
+                registry
+                    .provider_for_model(&format!("opencode-go/{model}"), None)
+                    .unwrap()
+                    .name(),
+                "opencode"
+            );
+        }
+    }
+
+    #[test]
+    fn deepseek_prefix_routes_direct_without_stealing_opencode_ids() {
+        let mut registry = Registry::new(AliasProvider::Codex);
+        registry.models.insert(
+            "deepseek".to_string(),
+            vec![
+                "deepseek/deepseek-flash".to_string(),
+                "deepseek/deepseek-v4-pro".to_string(),
+            ],
+        );
+        registry.models.insert(
+            "opencode".to_string(),
+            vec![
+                "deepseek-flash".to_string(),
+                "deepseek-v4-pro".to_string(),
+                "opencode-go/deepseek-flash".to_string(),
+                "opencode-go/deepseek-v4-pro".to_string(),
+            ],
+        );
+        for model in ["deepseek-flash", "deepseek-v4-pro"] {
+            assert_eq!(
+                registry.provider_for_model(model, None).unwrap().name(),
+                "opencode"
+            );
+            assert_eq!(
+                registry
+                    .provider_for_model(&format!("deepseek/{model}"), None)
+                    .unwrap()
+                    .name(),
+                "deepseek"
             );
             assert_eq!(
                 registry

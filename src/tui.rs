@@ -695,6 +695,7 @@ fn provider_cell(value: Option<&str>) -> Cell<'static> {
     let value = value.unwrap_or("-");
     let color = match value {
         "codex" => TEAL,
+        "deepseek" => Color::Rgb(110, 150, 245),
         "kimi" => Color::Rgb(190, 150, 220),
         "cursor" => Color::Rgb(140, 170, 230),
         "-" => DIM,
@@ -1742,7 +1743,7 @@ fn mock_setup_text(port: u16, registry: &Registry) -> String {
 
 pub fn setup_text(port: u16, registry: &Registry) -> String {
     let grouped = registry.grouped_models();
-    let model_summary = ["anthropic", "codex", "kimi", "cursor"]
+    let model_summary = ["anthropic", "codex", "deepseek", "kimi", "cursor"]
         .into_iter()
         .filter_map(|provider| {
             grouped
