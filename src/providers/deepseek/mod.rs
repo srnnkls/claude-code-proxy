@@ -1,6 +1,6 @@
 pub mod model;
 
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use async_trait::async_trait;
 use axum::{
@@ -32,6 +32,7 @@ pub struct DeepSeekProvider {
     base_url: BaseUrl,
     api_key: Option<String>,
     models: Vec<String>,
+    aliases: BTreeMap<String, String>,
 }
 
 impl DeepSeekProvider {
@@ -51,6 +52,7 @@ impl DeepSeekProvider {
             base_url,
             api_key: crate::config::deepseek_api_key(),
             models: crate::config::deepseek_models(),
+            aliases: crate::config::deepseek_aliases(),
         }
     }
 
@@ -61,6 +63,7 @@ impl DeepSeekProvider {
             base_url: BaseUrl::Ready(base_url),
             api_key,
             models: vec!["deepseek-flash".to_string(), "deepseek-v4-pro".to_string()],
+            aliases: BTreeMap::new(),
         }
     }
 
@@ -72,7 +75,7 @@ impl DeepSeekProvider {
                 "Missing model",
             );
         };
-        let Some(model) = model::resolve(requested_model, &self.models) else {
+        let Some(model) = model::resolve(requested_model, &self.models, &self.aliases) else {
             return json_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
@@ -171,7 +174,7 @@ impl Provider for DeepSeekProvider {
     }
 
     fn supported_models(&self) -> Vec<String> {
-        model::advertised_models_for(&self.models)
+        model::advertised_models_for(&self.models, &self.aliases)
     }
 
     fn cli(&self) -> &'static dyn CliHandlers {
@@ -196,7 +199,7 @@ impl Provider for DeepSeekProvider {
 
     async fn handle_count_tokens(&self, body: MessagesRequest, ctx: RequestContext) -> Response {
         let requested = body.model.as_deref().unwrap_or_default();
-        let Some(model) = model::resolve(requested, &self.models) else {
+        let Some(model) = model::resolve(requested, &self.models, &self.aliases) else {
             return json_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
@@ -375,10 +378,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn relay_preserves_base_path_replaces_credentials_and_rewrites_history() {
-        let (provider, seen, server) = mock_provider().await;
+    async fn relay_resolves_alias_replaces_credentials_and_rewrites_history() {
+        let (mut provider, seen, server) = mock_provider().await;
+        provider
+            .aliases
+            .insert("ds-flash".to_string(), "deepseek-flash".to_string());
         let body = json!({
-            "model": "deepseek/deepseek-flash",
+            "model": "ds-flash",
             "max_tokens": 64,
             "messages": [
                 {"role": "assistant", "content": [

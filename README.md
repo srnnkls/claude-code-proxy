@@ -103,7 +103,7 @@ for subscription authentication and thinking compatibility.
 | Provider     | Account                        | Model selection                                 |
 | ------------ | ------------------------------ | ----------------------------------------------- |
 | Codex        | ChatGPT Plus or Pro            | Registered `gpt-*` models, `-fast`/`-ultrafast` |
-| DeepSeek     | DeepSeek API key               | `deepseek/<model-id>` forms                     |
+| DeepSeek     | DeepSeek API key               | `deepseek/<model-id>` and configured aliases    |
 | Kimi         | kimi.com with Kimi Code access | `kimi-for-coding` and aliases                   |
 | Grok         | grok.com                       | Registered Grok models                          |
 | OpenCode Go  | OpenCode Go subscription       | Non-conflicting IDs and `opencode-go/<model-id>` |
