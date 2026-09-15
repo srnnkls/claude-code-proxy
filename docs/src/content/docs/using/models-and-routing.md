@@ -10,6 +10,7 @@ The model ID in each request selects its provider. One proxy listener can serve 
 | Pattern | Provider |
 | --- | --- |
 | Registered `gpt-*` IDs and their `-fast` forms | Codex |
+| `deepseek/<model-id>` forms configured for direct API access | DeepSeek |
 | `kimi-for-coding`, `kimi-k2.6`, `k2.6` | Kimi |
 | `grok-composer-2.5-fast`, `grok-4.5`, `grok-4.6` | Grok |
 | Non-conflicting registered OpenCode Go IDs and every `opencode-go/<model-id>` | OpenCode Go |

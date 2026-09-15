@@ -32,6 +32,7 @@ fn models_prints_all_providers() -> Result<(), Box<dyn std::error::Error>> {
     cmd.arg("models");
     let out = String::from_utf8(cmd.output()?.stdout)?;
     assert!(out.contains("codex:"));
+    assert!(out.contains("deepseek:"));
     assert!(out.contains("kimi:"));
     assert!(out.contains("opencode:"));
     assert!(out.contains("cursor:"));
@@ -55,6 +56,7 @@ fn help_describes_visible_commands_and_hides_demo() -> Result<(), Box<dyn std::e
         "Start the proxy server and monitor",
         "List supported provider models",
         "Manage Codex authentication",
+        "Manage DeepSeek authentication",
         "Manage Kimi authentication",
         "Manage Cursor authentication",
         "Manage Grok authentication",
@@ -88,6 +90,18 @@ fn unsupported_provider_auth_command_exits_two() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
+fn deepseek_auth_status_reports_external_key_source() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cmd = Command::cargo_bin("claude-code-proxy")?;
+    cmd.args(["deepseek", "auth", "status"])
+        .env_remove("CCP_DEEPSEEK_API_KEY")
+        .env("DEEPSEEK_API_KEY", "test-key")
+        .assert()
+        .success()
+        .stdout(contains("Source: DEEPSEEK_API_KEY"));
+    Ok(())
+}
+
+#[test]
 fn provider_logout_without_auth_is_success() -> Result<(), Box<dyn std::error::Error>> {
     let temp = TempDir::new()?;
     let mut cmd = Command::cargo_bin("claude-code-proxy")?;
@@ -104,9 +118,11 @@ fn models_output_is_stable_order() -> Result<(), Box<dyn std::error::Error>> {
     let output = cmd.output()?;
     let out = String::from_utf8(output.stdout)?;
     let codex_pos = out.find("codex:").unwrap_or(0);
+    let deepseek_pos = out.find("deepseek:").unwrap_or(0);
     let kimi_pos = out.find("kimi:").unwrap_or(0);
     let cursor_pos = out.find("cursor:").unwrap_or(0);
-    assert!(codex_pos < kimi_pos);
+    assert!(codex_pos < deepseek_pos);
+    assert!(deepseek_pos < kimi_pos);
     assert!(kimi_pos < cursor_pos);
     Ok(())
 }

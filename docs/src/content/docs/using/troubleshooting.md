@@ -22,12 +22,14 @@ claude-code-proxy codex auth status
 claude-code-proxy kimi auth status
 claude-code-proxy grok auth status
 claude-code-proxy cursor auth status
+claude-code-proxy deepseek auth status
 ```
 
-Use that provider's login command when credentials are missing or expired. Codex requires ChatGPT subscription auth, not an OpenAI API key. Each provider uses proxy-owned credentials.
-OpenCode Go has no `auth status` command; configure its API key through
-`CCP_OPENCODE_API_KEY`, `OPENCODE_API_KEY`, or `opencode.apiKey` in
-`config.json`.
+Use that provider's login command when credentials are missing or expired. Codex requires ChatGPT subscription auth, not an OpenAI API key. DeepSeek uses
+`CCP_DEEPSEEK_API_KEY`, `DEEPSEEK_API_KEY`, or `deepseek.apiKey` in
+`config.json` and has no login flow. OpenCode Go has no `auth status` command;
+configure its API key through `CCP_OPENCODE_API_KEY`, `OPENCODE_API_KEY`, or
+`opencode.apiKey` in `config.json`.
 
 ## Model returns HTTP 400
 

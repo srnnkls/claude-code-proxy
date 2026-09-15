@@ -1,3 +1,4 @@
+use base64::Engine;
 use bytes::Bytes;
 use serde_json::Value;
 
@@ -16,6 +17,21 @@ pub(super) fn resolve_model(model: &str) -> &str {
 /// Preserve the original bytes unless a local alias or foreign reasoning needs
 /// translation. Unknown Anthropic fields and native signatures remain intact.
 pub(super) fn prepare_body(raw: Bytes, model: &str) -> Result<Bytes, serde_json::Error> {
+    prepare_body_with_unsigned_policy(raw, model, true)
+}
+
+pub(crate) fn prepare_body_preserving_unsigned_thinking(
+    raw: Bytes,
+    model: &str,
+) -> Result<Bytes, serde_json::Error> {
+    prepare_body_with_unsigned_policy(raw, model, false)
+}
+
+fn prepare_body_with_unsigned_policy(
+    raw: Bytes,
+    model: &str,
+    rewrite_unsigned: bool,
+) -> Result<Bytes, serde_json::Error> {
     let mut document: Value = serde_json::from_slice(&raw)?;
     let mut changed = document.get("model").and_then(Value::as_str) != Some(model);
     if changed {
@@ -28,7 +44,7 @@ pub(super) fn prepare_body(raw: Bytes, model: &str) -> Result<Bytes, serde_json:
             }
             if let Some(blocks) = message.get_mut("content").and_then(Value::as_array_mut) {
                 for block in blocks {
-                    if let Some(text) = foreign_reasoning(block) {
+                    if let Some(text) = foreign_reasoning(block, rewrite_unsigned) {
                         *block = serde_json::json!({"type": "text", "text": previous_reasoning_text(text)});
                         changed = true;
                     }
@@ -43,21 +59,24 @@ pub(super) fn prepare_body(raw: Bytes, model: &str) -> Result<Bytes, serde_json:
     }
 }
 
-fn foreign_reasoning(block: &Value) -> Option<&str> {
+fn foreign_reasoning(block: &Value, rewrite_unsigned: bool) -> Option<&str> {
     if block.get("type").and_then(Value::as_str) != Some("thinking") {
         return None;
     }
-    let signature = block.get("signature").and_then(Value::as_str);
-    // Only interpret the proxy's own namespace. Anthropic signatures are opaque.
-    if signature.is_some_and(|signature| !signature.is_empty() && !is_proxy_signature(signature)) {
-        return None;
+    match block.get("signature").and_then(Value::as_str) {
+        Some(signature) if !signature.is_empty() && !is_proxy_signature(signature) => return None,
+        Some(signature) if signature.is_empty() && !rewrite_unsigned => return None,
+        None if !rewrite_unsigned => return None,
+        _ => {}
     }
     block.get("thinking").and_then(Value::as_str)
 }
 
 fn is_proxy_signature(signature: &str) -> bool {
-    // Kimi and OpenCode encode the complete `ccp:kimi:v1:` prefix as base64url.
-    signature.starts_with("ccp:") || signature.starts_with("Y2NwOmtpbWk6djE6")
+    signature.starts_with("ccp:")
+        || base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(signature)
+            .is_ok_and(|decoded| decoded.starts_with(b"ccp:"))
 }
 
 #[cfg(test)]
@@ -75,6 +94,53 @@ mod tests {
         assert_eq!(
             document["messages"][0]["content"][0],
             json!({"type":"text","text":previous_reasoning_text("Kimi summary")})
+        );
+    }
+
+    #[test]
+    fn encoded_opencode_reasoning_is_not_mistaken_for_anthropic_thinking() {
+        let raw = Bytes::from(
+            json!({
+                "model": "claude-opus-5",
+                "messages": [{
+                    "role": "assistant",
+                    "content": [{
+                        "type": "thinking",
+                        "thinking": "OpenCode summary",
+                        "signature": "Y2NwOm9wZW5jb2RlOnYxOm1zZ18xOjA"
+                    }]
+                }]
+            })
+            .to_string(),
+        );
+        let document: Value =
+            serde_json::from_slice(&prepare_body(raw, "claude-opus-5").unwrap()).unwrap();
+        assert_eq!(
+            document["messages"][0]["content"][0],
+            json!({"type":"text","text":previous_reasoning_text("OpenCode summary")})
+        );
+    }
+
+    #[test]
+    fn preserving_unsigned_thinking_still_rewrites_proxy_signatures() {
+        let raw = Bytes::from(json!({
+            "model": "deepseek-flash",
+            "messages": [{
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "native", "signature": ""},
+                    {"type": "thinking", "thinking": "foreign", "signature": "ccp:codex:v1:opaque"}
+                ]
+            }]
+        }).to_string());
+        let document: Value = serde_json::from_slice(
+            &prepare_body_preserving_unsigned_thinking(raw, "deepseek-flash").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(document["messages"][0]["content"][0]["type"], "thinking");
+        assert_eq!(
+            document["messages"][0]["content"][1],
+            json!({"type":"text","text":previous_reasoning_text("foreign")})
         );
     }
 
