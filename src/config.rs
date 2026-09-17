@@ -41,6 +41,8 @@ struct FileConfig {
     pub alias_provider: Option<String>,
     #[serde(rename = "autoReviewModel")]
     pub auto_review_model: Option<String>,
+    #[serde(rename = "foreignThinking")]
+    pub foreign_thinking: Option<String>,
     pub log: Option<FileLog>,
     pub kimi: Option<KimiConfig>,
     pub codex: Option<CodexConfig>,
@@ -244,6 +246,19 @@ pub fn bind_address() -> String {
 
 pub fn alias_provider() -> AliasProvider {
     load_config().alias_provider
+}
+
+pub fn foreign_thinking() -> Option<String> {
+    let env: HashMap<_, _> = std::env::vars().collect();
+    if let Some(raw) = env
+        .get("CCP_FOREIGN_THINKING")
+        .filter(|raw| !raw.is_empty())
+    {
+        return Some(raw.clone());
+    }
+    read_file_config(&paths::config_dir())?
+        .foreign_thinking
+        .filter(|raw| !raw.is_empty())
 }
 
 pub fn log_verbose() -> bool {

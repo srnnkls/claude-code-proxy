@@ -7,12 +7,12 @@ use serde_json::Value;
 use crate::anthropic::schema::MessagesRequest;
 use crate::config;
 use crate::providers::translate_shared::{
-    ContentBlock, flatten_system_text, image_source_to_url, normalize_content, parallel_tool_calls,
-    previous_reasoning_text, read_effort,
+    ContentBlock, ForeignReasoning, flatten_system_text, foreign_reasoning, image_source_to_url,
+    normalize_content, parallel_tool_calls, previous_reasoning_text, read_effort,
 };
 
 use super::read_rewrite::{ReadOffsetRewrite, read_offset_rewrite};
-use super::reasoning_signature::decode_reasoning_signature;
+use super::reasoning_signature::{decode_reasoning_signature, is_proxy_reasoning_signature};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -478,7 +478,7 @@ fn translate_request_inner(
 ) -> Result<ResponsesRequest, anyhow::Error> {
     let instructions = flatten_system_text(req.extra.get("system"));
     let is_compact = is_compact_messages_request(req);
-    let input = build_input(req);
+    let input = build_input_with_policy(req, foreign_reasoning());
     let tools = read_tools(req)?;
     let tool_choice = map_tool_choice(req)?;
     let parallel_tool_calls = parallel_tool_calls(req).unwrap_or(true);
@@ -854,7 +854,10 @@ fn map_tool_choice(req: &MessagesRequest) -> Result<Option<ResponsesToolChoice>,
     }
 }
 
-fn build_input(req: &MessagesRequest) -> Vec<ResponsesInputItem> {
+fn build_input_with_policy(
+    req: &MessagesRequest,
+    foreign_reasoning_policy: ForeignReasoning,
+) -> Vec<ResponsesInputItem> {
     let mut out: Vec<ResponsesInputItem> = Vec::new();
     let mut read_tool_uses_with_offset = HashSet::new();
 
@@ -977,7 +980,12 @@ fn build_input(req: &MessagesRequest) -> Vec<ResponsesInputItem> {
                                     summary: Vec::new(),
                                     encrypted_content: replay.encrypted_content,
                                 });
-                            } else if !thinking.is_empty() {
+                            } else if !thinking.is_empty()
+                                && (foreign_reasoning_policy.carries()
+                                    || signature
+                                        .as_deref()
+                                        .is_some_and(is_proxy_reasoning_signature))
+                            {
                                 text_parts.push(ResponsesContentPart::OutputText {
                                     text: previous_reasoning_text(thinking),
                                 });
@@ -2633,5 +2641,57 @@ mod tests {
         assert_eq!(input[3]["type"], "function_call_output");
         assert!(!out.to_string().contains("opaque-native-signature"));
         assert!(!out.to_string().contains("opaque-redaction"));
+    }
+
+    #[test]
+    fn dropping_removes_foreign_summaries_but_keeps_the_turn() {
+        let req: MessagesRequest = serde_json::from_value(json!({
+            "model":"gpt-6-astra", "messages":[{"role":"assistant","content":[
+                {"type":"thinking","thinking":"Claude summary","signature":"opaque-native-signature"},
+                {"type":"text","text":"answer"}
+            ]}]
+        })).unwrap();
+        let input = build_input_with_policy(&req, ForeignReasoning::Drop);
+        let out = serde_json::to_value(&input).unwrap();
+        assert_eq!(out.as_array().unwrap().len(), 1);
+        assert_eq!(out[0]["content"][0]["text"], "answer");
+        assert!(!out.to_string().contains("previous_reasoning"));
+    }
+
+    #[test]
+    fn dropping_keeps_a_codex_summary_whose_signature_will_not_decode() {
+        let req: MessagesRequest = serde_json::from_value(json!({
+            "model":"gpt-6-astra", "messages":[{"role":"assistant","content":[
+                {"type":"thinking","thinking":"own summary","signature":"ccp:codex:v1:not-base64"}
+            ]}]
+        }))
+        .unwrap();
+        let out =
+            serde_json::to_value(build_input_with_policy(&req, ForeignReasoning::Drop)).unwrap();
+        assert_eq!(
+            out[0]["content"][0]["text"],
+            "<previous_reasoning>\nown summary\n</previous_reasoning>"
+        );
+    }
+
+    #[test]
+    fn dropping_still_replays_a_decodable_codex_signature() {
+        let signature = super::super::reasoning_signature::encode_reasoning_signature(
+            &super::super::reasoning_signature::ReasoningReplay {
+                id: "rs_1".to_string(),
+                encrypted_content: "gAAAAopaque".to_string(),
+            },
+        )
+        .unwrap();
+        let req: MessagesRequest = serde_json::from_value(json!({
+            "model":"gpt-6-astra", "messages":[{"role":"assistant","content":[
+                {"type":"thinking","thinking":"summary","signature":signature}
+            ]}]
+        }))
+        .unwrap();
+        let out =
+            serde_json::to_value(build_input_with_policy(&req, ForeignReasoning::Drop)).unwrap();
+        assert_eq!(out[0]["type"], "reasoning");
+        assert_eq!(out[0]["encrypted_content"], "gAAAAopaque");
     }
 }

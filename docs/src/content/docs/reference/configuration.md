@@ -15,6 +15,7 @@ These settings configure the proxy process. Claude Code client settings such as 
   "port": 18765,
   "aliasProvider": "codex",
   "autoReviewModel": "gpt-5.6-terra",
+  "foreignThinking": "carry",
   "codex": {
     "originator": "claude-code-proxy",
     "userAgent": "claude-code-proxy/0.1.24",
@@ -78,6 +79,7 @@ All keys are optional. An unreadable file, malformed JSON, or incompatible field
 | `CCP_CONFIG_DIR` | none | Platform config directory | Replaces the configuration and file-backed auth root. |
 | `CCP_ALIAS_PROVIDER` | `aliasProvider` | `codex` | Routes recognized Anthropic-style aliases through `codex` or `kimi`; `anthropic` enables [native Anthropic passthrough](/providers/anthropic/). |
 | `CCP_AUTO_REVIEW_MODEL` | `autoReviewModel` | `gpt-6-luna` for Codex | Routes Claude Code's non-streaming, tool-free Bash security-review classifier through a registered model. |
+| `CCP_FOREIGN_THINKING` | `foreignThinking` | `carry` | `carry` replays another provider's reasoning summary as `<previous_reasoning>` text after a model switch; `drop` omits it. Reasoning a provider can replay natively is unaffected. |
 | `CCP_LOG_STDERR` | `log.stderr` | `false` | Mirrors logs to stderr when present in the environment, regardless of its value. |
 | `CCP_LOG_VERBOSE` | `log.verbose` | `false` | Preserves full string fields in structured logs when present, regardless of its value. |
 | `CCP_TRAFFIC_LOG` | none | `false` | Enables full request captures for `1`, `true`, or `yes`. |
