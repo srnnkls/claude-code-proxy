@@ -36,6 +36,8 @@ When switching from GPT to Claude, unsigned thinking and thinking with proxy-own
 
 This carries visible summaries across providers, not encrypted internal reasoning. Switch after a completed turn. Changing providers during an unfinished tool-use turn can still fail the receiving provider's history validation.
 
+`CCP_FOREIGN_THINKING=drop` omits those summaries instead, which keeps a long conversation from re-sending stale reasoning on every turn after a switch. Reasoning the receiving provider owns is unaffected: a Codex signature that still decodes replays in its encrypted form, and a summary whose own provider's signature fails to decode keeps its text. An assistant turn that holds nothing but foreign reasoning keeps the text form rather than becoming empty.
+
 ## HTTP behavior and monitor
 
 `POST /v1/messages` and `POST /v1/messages/count_tokens` preserve query parameters and forward Anthropic authentication and beta headers. Local aliases and the `[1m]` suffix are resolved before forwarding. Redirects are not followed. Upstream status codes, request IDs, retry headers, response bodies and SSE events are preserved; connection-specific headers are removed.

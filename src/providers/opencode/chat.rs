@@ -17,7 +17,8 @@ use crate::monitor::{MonitorHandle, usage_from_anthropic_sse};
 use crate::providers::{
     grok::translate::stream::SseDecoder,
     translate_shared::{
-        ContentBlock, flatten_system_text, image_source_to_url, normalize_content, read_effort,
+        ContentBlock, ForeignReasoning, flatten_system_text, foreign_reasoning,
+        image_source_to_url, normalize_content, read_effort, reasoning_signature_owner,
     },
 };
 use crate::traffic::{StreamTrafficCapture, TrafficCapture};
@@ -80,6 +81,7 @@ pub fn prepare_request(req: &MessagesRequest, model: &str) -> anyhow::Result<Cha
 
 fn build_messages(req: &MessagesRequest, model: &str) -> anyhow::Result<Vec<Value>> {
     let deepseek = model.to_ascii_lowercase().contains("deepseek");
+    let policy = foreign_reasoning();
     let mut system = Vec::new();
     if let Some(text) = flatten_system_text(req.extra.get("system")) {
         system.push(text);
@@ -104,7 +106,7 @@ fn build_messages(req: &MessagesRequest, model: &str) -> anyhow::Result<Vec<Valu
             }
             "user" => push_user_messages(&mut messages, &blocks),
             "assistant" => {
-                if let Some(message) = assistant_message(&blocks, deepseek)? {
+                if let Some(message) = assistant_message(&blocks, deepseek, policy)? {
                     messages.push(message);
                 }
             }
@@ -179,7 +181,11 @@ fn push_user_messages(messages: &mut Vec<Value>, blocks: &[ContentBlock]) {
     flush(messages, &mut content);
 }
 
-fn assistant_message(blocks: &[ContentBlock], deepseek: bool) -> anyhow::Result<Option<Value>> {
+fn assistant_message(
+    blocks: &[ContentBlock],
+    deepseek: bool,
+    policy: ForeignReasoning,
+) -> anyhow::Result<Option<Value>> {
     let mut text = String::new();
     let mut reasoning = String::new();
     let mut tool_calls = Vec::new();
@@ -188,8 +194,15 @@ fn assistant_message(blocks: &[ContentBlock], deepseek: bool) -> anyhow::Result<
             ContentBlock::Text { text: value } => text.push_str(value),
             ContentBlock::Thinking {
                 thinking,
-                signature: _,
+                signature,
             } => {
+                let own = signature
+                    .as_deref()
+                    .and_then(reasoning_signature_owner)
+                    .is_some_and(|owner| owner == "opencode");
+                if !policy.carries() && !own {
+                    continue;
+                }
                 if !reasoning.is_empty() && !thinking.is_empty() {
                     reasoning.push_str("\n\n");
                 }
@@ -1265,6 +1278,25 @@ mod tests {
 
     fn request(value: Value) -> MessagesRequest {
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn dropping_removes_foreign_reasoning_but_keeps_opencode_reasoning() {
+        let own = make_thinking_signature("msg_1", 0);
+        let blocks = normalize_content(
+            &json!([
+                {"type":"thinking","thinking":"opencode thought","signature":own},
+                {"type":"thinking","thinking":"codex thought","signature":"ccp:codex:v1:cnNfMQ:blob"},
+                {"type":"thinking","thinking":"claude thought","signature":"opaque"},
+                {"type":"text","text":"answer"}
+            ]),
+            json!({}),
+        );
+        let message = assistant_message(&blocks, false, ForeignReasoning::Drop)
+            .unwrap()
+            .unwrap();
+        assert_eq!(message["reasoning_content"], "opencode thought");
+        assert_eq!(message["content"], "answer");
     }
 
     #[test]

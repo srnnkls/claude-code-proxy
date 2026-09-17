@@ -1,8 +1,7 @@
-use base64::Engine;
 use bytes::Bytes;
 use serde_json::Value;
 
-use crate::providers::translate_shared::previous_reasoning_text;
+use crate::providers::translate_shared::{self, ForeignReasoning, previous_reasoning_text};
 
 pub(super) fn resolve_model(model: &str) -> &str {
     match model {
@@ -32,6 +31,20 @@ fn prepare_body_with_unsigned_policy(
     model: &str,
     rewrite_unsigned: bool,
 ) -> Result<Bytes, serde_json::Error> {
+    prepare_body_with_policies(
+        raw,
+        model,
+        rewrite_unsigned,
+        translate_shared::foreign_reasoning(),
+    )
+}
+
+fn prepare_body_with_policies(
+    raw: Bytes,
+    model: &str,
+    rewrite_unsigned: bool,
+    policy: ForeignReasoning,
+) -> Result<Bytes, serde_json::Error> {
     let mut document: Value = serde_json::from_slice(&raw)?;
     let mut changed = document.get("model").and_then(Value::as_str) != Some(model);
     if changed {
@@ -43,6 +56,16 @@ fn prepare_body_with_unsigned_policy(
                 continue;
             }
             if let Some(blocks) = message.get_mut("content").and_then(Value::as_array_mut) {
+                let foreign = blocks
+                    .iter()
+                    .filter(|block| foreign_reasoning(block, rewrite_unsigned).is_some())
+                    .count();
+                let drop_foreign = !policy.carries() && foreign < blocks.len();
+                if drop_foreign {
+                    blocks.retain(|block| foreign_reasoning(block, rewrite_unsigned).is_none());
+                    changed |= foreign > 0;
+                    continue;
+                }
                 for block in blocks {
                     if let Some(text) = foreign_reasoning(block, rewrite_unsigned) {
                         *block = serde_json::json!({"type": "text", "text": previous_reasoning_text(text)});
@@ -73,10 +96,7 @@ fn foreign_reasoning(block: &Value, rewrite_unsigned: bool) -> Option<&str> {
 }
 
 fn is_proxy_signature(signature: &str) -> bool {
-    signature.starts_with("ccp:")
-        || base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(signature)
-            .is_ok_and(|decoded| decoded.starts_with(b"ccp:"))
+    translate_shared::reasoning_signature_owner(signature).is_some()
 }
 
 #[cfg(test)]
@@ -141,6 +161,41 @@ mod tests {
         assert_eq!(
             document["messages"][0]["content"][1],
             json!({"type":"text","text":previous_reasoning_text("foreign")})
+        );
+    }
+
+    #[test]
+    fn dropping_removes_foreign_reasoning_and_keeps_the_rest_of_the_turn() {
+        let raw = Bytes::from(json!({"model":"claude-opus-5", "messages":[{"role":"assistant","content":[
+            {"type":"thinking","thinking":"summary","signature":"ccp:codex:v1:cnNfMQ:encrypted"},
+            {"type":"thinking","thinking":"native","signature":"opaque"},
+            {"type":"tool_use","id":"call1","name":"Read","input":{"path":"x"}}
+        ]}]}).to_string());
+        let document: Value = serde_json::from_slice(
+            &prepare_body_with_policies(raw, "claude-opus-5", true, ForeignReasoning::Drop)
+                .unwrap(),
+        )
+        .unwrap();
+        let blocks = document["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["signature"], "opaque");
+        assert_eq!(blocks[1]["type"], "tool_use");
+        assert!(!document.to_string().contains("previous_reasoning"));
+    }
+
+    #[test]
+    fn dropping_never_empties_an_assistant_turn() {
+        let raw = Bytes::from(json!({"model":"claude-opus-5", "messages":[{"role":"assistant","content":[
+            {"type":"thinking","thinking":"only block","signature":"ccp:codex:v1:cnNfMQ:encrypted"}
+        ]}]}).to_string());
+        let document: Value = serde_json::from_slice(
+            &prepare_body_with_policies(raw, "claude-opus-5", true, ForeignReasoning::Drop)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            document["messages"][0]["content"][0],
+            json!({"type":"text","text":previous_reasoning_text("only block")})
         );
     }
 
