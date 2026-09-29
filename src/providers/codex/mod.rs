@@ -55,7 +55,8 @@ use self::translate::model_allowlist::{
 };
 use self::translate::reducer::finish_metadata_from_upstream;
 use self::translate::request::{
-    TranslateOptions, has_hosted_web_search, is_compact_messages_request, translate_request,
+    TranslateOptions, has_hosted_web_search, is_compact_messages_request, is_final_turn_request,
+    translate_request,
 };
 
 const MAX_RETRYABLE_LIVE_STREAM_RETRIES: u32 = 10;
@@ -217,6 +218,7 @@ impl CodexProvider {
         };
 
         let compact_boundary = is_compact_messages_request(&body);
+        let empty_completion = EmptyCompletion::for_request(&body);
         let server_compaction_enabled = config::codex_server_compaction();
         let mut compaction_attempt = None;
         if !server_compaction_enabled && let Some(session_id) = ctx.session_id.as_deref() {
@@ -343,6 +345,7 @@ impl CodexProvider {
                     compact_boundary,
                     attempt: compaction_attempt,
                 },
+                empty_completion,
                 configured_transport,
             )
             .await;
@@ -396,7 +399,9 @@ impl CodexProvider {
                     return map_codex_error_to_response(&e);
                 }
             };
-            if !is_empty_codex_success_completion(&response.body) {
+            if empty_completion == EmptyCompletion::EndTurn
+                || !is_empty_codex_success_completion(&response.body)
+            {
                 break response;
             }
             // A successful terminal event with no output would translate into
@@ -714,6 +719,22 @@ struct LiveStreamCompaction {
     attempt: Option<CompactionAttempt>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EmptyCompletion {
+    Retry,
+    EndTurn,
+}
+
+impl EmptyCompletion {
+    fn for_request(request: &MessagesRequest) -> Self {
+        if is_final_turn_request(request) {
+            Self::EndTurn
+        } else {
+            Self::Retry
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn live_stream_response(
     client: Arc<CodexHttpClient>,
@@ -723,6 +744,7 @@ async fn live_stream_response(
     request_body: translate::request::ResponsesRequest,
     continuation: ContinuationReservation,
     compaction: LiveStreamCompaction,
+    empty_completion: EmptyCompletion,
     transport: config::CodexTransport,
 ) -> Response {
     let model = model.to_string();
@@ -796,6 +818,7 @@ async fn live_stream_response(
             request_continuation.clone(),
             request_body.clone(),
             compaction,
+            empty_completion,
         )
         .await
         {
@@ -861,6 +884,7 @@ async fn live_stream_response_once(
     request_continuation: ContinuationReservation,
     request_body: translate::request::ResponsesRequest,
     compaction: LiveStreamCompaction,
+    empty_completion: EmptyCompletion,
 ) -> LiveStreamStart {
     let estimated_input_tokens = count_translated_tokens(&request_body);
     let mut translator = LiveStreamTranslator::with_estimated_input_tokens(
@@ -942,6 +966,7 @@ async fn live_stream_response_once(
         if terminal
             && is_codex_success_terminal_event(&payload)
             && !translator.has_semantic_output()
+            && empty_completion == EmptyCompletion::Retry
         {
             return provider_retry(&upstream_events, empty_live_completion_error());
         }
@@ -1998,6 +2023,7 @@ mod tests {
                 compact_boundary: false,
                 attempt: None,
             },
+            EmptyCompletion::Retry,
         )
         .await
         {
@@ -2272,6 +2298,7 @@ mod tests {
                     compact_boundary: false,
                     attempt: Some(compaction_attempt),
                 },
+                EmptyCompletion::Retry,
                 config::CodexTransport::WebSocket,
             ),
         )
@@ -2387,6 +2414,7 @@ mod tests {
                     compact_boundary: false,
                     attempt: Some(compaction_attempt),
                 },
+                EmptyCompletion::Retry,
                 config::CodexTransport::WebSocket,
             )
             .await
@@ -2472,6 +2500,7 @@ mod tests {
                     compact_boundary: false,
                     attempt: Some(compaction_attempt),
                 },
+                EmptyCompletion::Retry,
                 config::CodexTransport::WebSocket,
             ),
         )
@@ -2658,6 +2687,7 @@ mod tests {
                     compact_boundary: false,
                     attempt: Some(compaction_attempt),
                 },
+                EmptyCompletion::Retry,
                 config::CodexTransport::WebSocket,
             )
             .await

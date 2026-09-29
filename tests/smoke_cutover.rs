@@ -3266,6 +3266,106 @@ async fn smoke_codex_websocket_empty_completions_exhaust_to_service_unavailable(
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread")]
+async fn smoke_codex_websocket_empty_completion_after_handback_ends_turn() {
+    let _guard = env_lock();
+    let _delay_guard = ZeroRetryDelayGuard::enable();
+    let config = TempDir::new().unwrap();
+    write_auth(config.path(), "codex");
+    clear_codex_websocket_pool_for_tests();
+    clear_all_continuations_for_tests();
+
+    let request_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let upstream = spawn_websocket_always_empty_completion_upstream(request_count.clone()).await;
+
+    let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
+    let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
+
+    let response = call_messages_body(handback_messages_body(true)).await;
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body_text = String::from_utf8_lossy(&body);
+
+    assert_eq!(status, StatusCode::OK, "body: {body_text}");
+    assert!(
+        body_text.contains("message_stop"),
+        "an accepted empty completion must still end the turn: {body_text}"
+    );
+    assert_eq!(
+        request_count.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "an empty turn after a handback must not be retried"
+    );
+
+    clear_all_continuations_for_tests();
+    clear_codex_websocket_pool_for_tests();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn smoke_codex_http_empty_completion_after_handback_ends_turn() {
+    let _guard = env_lock();
+    let _delay_guard = ZeroRetryDelayGuard::enable();
+    let config = TempDir::new().unwrap();
+    write_auth(config.path(), "codex");
+
+    let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let upstream = spawn_http_upstream({
+        let attempts = attempts.clone();
+        move |_body: Value| {
+            attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            empty_completion_sse()
+        }
+    })
+    .await;
+
+    let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
+    let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
+
+    let response = call_messages_body(handback_messages_body(false)).await;
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body_text = String::from_utf8_lossy(&body);
+
+    assert_eq!(status, StatusCode::OK, "body: {body_text}");
+    let value: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["stop_reason"], "end_turn");
+    assert_eq!(
+        attempts.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "an empty turn after a handback must not be retried"
+    );
+}
+
+fn handback_messages_body(stream: bool) -> Value {
+    json!({
+        "model": "gpt-5.5",
+        "max_tokens": 64,
+        "stream": stream,
+        "messages": [
+            {"role":"user","content":"review the draft"},
+            {"role":"assistant","content":[{
+                "type":"tool_use",
+                "id":"toolu_handback",
+                "name":"SubagentHandback",
+                "input":{"message":"report"}
+            }]},
+            {"role":"user","content":[{
+                "type":"tool_result",
+                "tool_use_id":"toolu_handback",
+                "content":"delivered"
+            }]}
+        ]
+    })
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread")]
 async fn smoke_codex_websocket_previous_response_id_sends_delta_on_second_turn() {
     let _guard = env_lock();
     let config = TempDir::new().unwrap();

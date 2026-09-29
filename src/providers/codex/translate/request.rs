@@ -355,6 +355,38 @@ pub(crate) fn is_compact_messages_request(request: &MessagesRequest) -> bool {
         })
 }
 
+/// Claude Code tells a subagent to stop after calling SubagentHandback.
+const FINAL_TURN_TOOL_NAMES: &[&str] = &["SubagentHandback"];
+
+fn content_blocks(content: &Value) -> &[Value] {
+    content.as_array().map(Vec::as_slice).unwrap_or_default()
+}
+
+fn block_str<'a>(block: &'a Value, key: &str) -> Option<&'a str> {
+    block.get(key).and_then(Value::as_str)
+}
+
+pub(crate) fn is_final_turn_request(request: &MessagesRequest) -> bool {
+    let [.., assistant, user] = request.messages.as_slice() else {
+        return false;
+    };
+    if assistant.role != "assistant" || user.role != "user" {
+        return false;
+    }
+    let final_call_ids: Vec<&str> = content_blocks(&assistant.content)
+        .iter()
+        .filter(|block| block_str(block, "type") == Some("tool_use"))
+        .filter(|block| {
+            block_str(block, "name").is_some_and(|name| FINAL_TURN_TOOL_NAMES.contains(&name))
+        })
+        .filter_map(|block| block_str(block, "id"))
+        .collect();
+    content_blocks(&user.content).iter().any(|block| {
+        block_str(block, "type") == Some("tool_result")
+            && block_str(block, "tool_use_id").is_some_and(|id| final_call_ids.contains(&id))
+    })
+}
+
 /// Reasoning-effort cap applied to compaction requests, or None when the
 /// fast path is disabled. Summarization is extraction, not problem solving:
 /// native Claude Code compacts without extended thinking, so burning
@@ -1871,6 +1903,74 @@ mod tests {
         .unwrap();
 
         assert!(!is_compact_messages_request(&req));
+    }
+
+    fn handback_request(tool_name: &str, result_tool_use_id: &str) -> MessagesRequest {
+        serde_json::from_value(json!({
+            "model": "gpt-5.6-sol",
+            "messages": [
+                {"role": "user", "content": "review the draft"},
+                {"role": "assistant", "content": [
+                    {"type": "text", "text": "done"},
+                    {"type": "tool_use", "id": "toolu_1", "name": tool_name, "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": result_tool_use_id, "content": "ok"}
+                ]}
+            ]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn turn_after_handback_result_may_end_empty() {
+        assert!(is_final_turn_request(&handback_request(
+            "SubagentHandback",
+            "toolu_1"
+        )));
+    }
+
+    #[test]
+    fn turn_after_other_tool_result_must_produce_output() {
+        assert!(!is_final_turn_request(&handback_request("Bash", "toolu_1")));
+    }
+
+    #[test]
+    fn handback_result_must_answer_the_handback_call() {
+        assert!(!is_final_turn_request(&handback_request(
+            "SubagentHandback",
+            "toolu_other"
+        )));
+    }
+
+    #[test]
+    fn reminder_text_beside_handback_result_keeps_the_turn_final() {
+        let req: MessagesRequest = serde_json::from_value(json!({
+            "model": "gpt-5.6-sol",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "toolu_1", "name": "SubagentHandback", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"},
+                    {"type": "text", "text": "<system-reminder>idle</system-reminder>"}
+                ]}
+            ]
+        }))
+        .unwrap();
+
+        assert!(is_final_turn_request(&req));
+    }
+
+    #[test]
+    fn plain_user_turn_must_produce_output() {
+        let req: MessagesRequest = serde_json::from_value(json!({
+            "model": "gpt-5.6-sol",
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .unwrap();
+
+        assert!(!is_final_turn_request(&req));
     }
 
     #[test]
