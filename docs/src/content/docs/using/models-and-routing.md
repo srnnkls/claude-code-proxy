@@ -10,6 +10,7 @@ The model ID in each request selects its provider. One proxy listener can serve 
 | Pattern | Provider |
 | --- | --- |
 | Registered `gpt-*` IDs and their `-fast` forms | Codex |
+| `deepseek/<model-id>` forms and configured aliases | DeepSeek |
 | `kimi-for-coding`, `kimi-k2.6`, `k2.6` | Kimi |
 | `grok-composer-2.5-fast`, `grok-4.5`, `grok-4.6` | Grok |
 | Non-conflicting registered OpenCode Go IDs and every `opencode-go/<model-id>` | OpenCode Go |
@@ -81,4 +82,6 @@ ANTHROPIC_SMALL_FAST_MODEL=gpt-6-luna[1m] \
 
 ## Alias routing
 
-`CCP_ALIAS_PROVIDER=kimi` or `"aliasProvider": "kimi"` routes recognized Anthropic-style aliases to Kimi. Accepted values are `codex` and `kimi`. Explicit provider IDs always use their provider.
+`CCP_ALIAS_PROVIDER=kimi` or `"aliasProvider": "kimi"` routes recognized Anthropic-style aliases to Kimi. Accepted values are `codex`, `kimi`, and `anthropic`. Explicit provider IDs always use their provider.
+
+With `anthropic`, Claude aliases and explicit `claude-*` IDs go to [Anthropic](/providers/anthropic/) using the credentials Claude Code sends. They remain on Anthropic even after a GPT or Kimi turn establishes session affinity. Existing `codex` and `kimi` alias behavior is unchanged.

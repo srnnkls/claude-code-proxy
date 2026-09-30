@@ -1,6 +1,6 @@
 # claude-code-proxy
 
-Claude Code, powered by **OpenAI Codex**, **Kimi**, **Grok**, **OpenCode Go**,
+Claude Code, powered by **OpenAI Codex**, DeepSeek, **Kimi**, **Grok**, **OpenCode Go**,
 or **Cursor Agent**.
 
 Docs: <https://claude-code-proxy.raine.dev>
@@ -87,9 +87,16 @@ The opt-in Images API returns base64 image data and consumes the signed-in accou
 
 ## Providers
 
+To keep Claude models on Anthropic while switching GPT models through Codex in the
+same session, opt in with `CCP_ALIAS_PROVIDER=anthropic`. See
+[Anthropic passthrough](https://claude-code-proxy.raine.dev/providers/anthropic/)
+for subscription authentication and thinking compatibility.
+
+
 | Provider     | Account                        | Model selection                                 |
 | ------------ | ------------------------------ | ----------------------------------------------- |
 | Codex        | ChatGPT Plus or Pro            | Registered `gpt-*` models and `-fast` variants  |
+| DeepSeek     | DeepSeek API key               | `deepseek/<model-id>` and configured aliases    |
 | Kimi         | kimi.com with Kimi Code access | `kimi-for-coding` and aliases                   |
 | Grok         | grok.com                       | Registered Grok models                          |
 | OpenCode Go  | OpenCode Go subscription       | Non-conflicting IDs and `opencode-go/<model-id>` |

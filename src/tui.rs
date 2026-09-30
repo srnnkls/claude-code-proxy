@@ -695,6 +695,7 @@ fn provider_cell(value: Option<&str>) -> Cell<'static> {
     let value = value.unwrap_or("-");
     let color = match value {
         "codex" => TEAL,
+        "deepseek" => Color::Rgb(110, 150, 245),
         "kimi" => Color::Rgb(190, 150, 220),
         "cursor" => Color::Rgb(140, 170, 230),
         "-" => DIM,
@@ -1742,7 +1743,7 @@ fn mock_setup_text(port: u16, registry: &Registry) -> String {
 
 pub fn setup_text(port: u16, registry: &Registry) -> String {
     let grouped = registry.grouped_models();
-    let model_summary = ["codex", "kimi", "cursor"]
+    let model_summary = ["anthropic", "codex", "deepseek", "kimi", "cursor"]
         .into_iter()
         .filter_map(|provider| {
             grouped
@@ -1759,7 +1760,11 @@ pub fn setup_text(port: u16, registry: &Registry) -> String {
     lines.push(format!(
         "export ANTHROPIC_BASE_URL=\"http://localhost:{port}\""
     ));
-    lines.push("export ANTHROPIC_AUTH_TOKEN=\"anything\"".to_string());
+    lines.push(if registry.provider("anthropic").is_some() {
+        "unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY # use Claude Code's login".to_string()
+    } else {
+        "export ANTHROPIC_AUTH_TOKEN=\"anything\"".to_string()
+    });
     lines.push("export ANTHROPIC_MODEL=\"gpt-6-sol\"".to_string());
     lines.push("export ANTHROPIC_SMALL_FAST_MODEL=\"gpt-6-luna\"".to_string());
     lines.push("export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1".to_string());

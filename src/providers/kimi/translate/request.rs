@@ -4,8 +4,9 @@ use serde_json::Value;
 use super::model_allowlist::{KIMI_DEFAULT_MODEL, assert_allowed_model, is_k3, resolve_model};
 use crate::anthropic::schema::MessagesRequest;
 use crate::providers::translate_shared::{
-    ContentBlock, flatten_system_text, image_block_to_url, image_source_to_url, normalize_content,
-    parallel_tool_calls, read_effort,
+    ContentBlock, ForeignReasoning, flatten_system_text, foreign_reasoning, image_block_to_url,
+    image_source_to_url, normalize_content, parallel_tool_calls, read_effort,
+    reasoning_signature_owner,
 };
 
 // ---------------------------------------------------------------------------
@@ -279,6 +280,7 @@ fn read_tools(req: &MessagesRequest) -> Result<Vec<KimiTool>, anyhow::Error> {
 fn build_messages(req: &MessagesRequest, model: &str) -> Result<Vec<KimiMessage>, anyhow::Error> {
     let mut out: Vec<KimiMessage> = Vec::new();
     let k3_mode = is_k3(model);
+    let policy = foreign_reasoning();
 
     // For k3: collect system text and prepend to first user message
     // For other models: emit as system role
@@ -379,7 +381,7 @@ fn build_messages(req: &MessagesRequest, model: &str) -> Result<Vec<KimiMessage>
                     push_user_messages(&mut out, &blocks);
                 }
             }
-            "assistant" => push_assistant_message(&mut out, &blocks),
+            "assistant" => push_assistant_message(&mut out, &blocks, policy),
             "system" | "developer" => {
                 let text = blocks
                     .iter()
@@ -558,7 +560,11 @@ enum KimiToolResultPart {
     ImageUrl { image_url: KimiImageUrl },
 }
 
-fn push_assistant_message(out: &mut Vec<KimiMessage>, blocks: &[ContentBlock]) {
+fn push_assistant_message(
+    out: &mut Vec<KimiMessage>,
+    blocks: &[ContentBlock],
+    policy: ForeignReasoning,
+) {
     let mut text_parts: Vec<String> = Vec::new();
     let mut thinking_parts: Vec<String> = Vec::new();
     let mut tool_calls: Vec<KimiAssistantToolCall> = Vec::new();
@@ -570,8 +576,15 @@ fn push_assistant_message(out: &mut Vec<KimiMessage>, blocks: &[ContentBlock]) {
                     text_parts.push(text.clone());
                 }
             }
-            ContentBlock::Thinking { thinking, .. } => {
-                if !thinking.is_empty() {
+            ContentBlock::Thinking {
+                thinking,
+                signature,
+            } => {
+                let own = signature
+                    .as_deref()
+                    .and_then(reasoning_signature_owner)
+                    .is_some_and(|owner| owner == "kimi");
+                if !thinking.is_empty() && (policy.carries() || own) {
                     thinking_parts.push(thinking.clone());
                 }
             }
@@ -743,6 +756,28 @@ mod tests {
                 );
             }
             _ => panic!("expected Tool message"),
+        }
+    }
+
+    #[test]
+    fn dropping_removes_foreign_reasoning_but_keeps_kimi_reasoning() {
+        let own = super::super::signature::make_thinking_signature("msg_1", 0);
+        let blocks = normalize_content(
+            &json!([
+                {"type":"thinking","thinking":"kimi thought","signature":own},
+                {"type":"thinking","thinking":"codex thought","signature":"ccp:codex:v1:cnNfMQ:blob"},
+                {"type":"thinking","thinking":"claude thought","signature":"opaque"},
+                {"type":"text","text":"answer"}
+            ]),
+            Value::Null,
+        );
+        let mut out = Vec::new();
+        push_assistant_message(&mut out, &blocks, ForeignReasoning::Drop);
+        match &out[0] {
+            KimiMessage::Assistant {
+                reasoning_content, ..
+            } => assert_eq!(reasoning_content.as_deref(), Some("kimi thought")),
+            other => panic!("expected assistant message, got {other:?}"),
         }
     }
 

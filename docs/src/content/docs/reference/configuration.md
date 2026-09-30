@@ -15,6 +15,7 @@ These settings configure the proxy process. Claude Code client settings such as 
   "port": 18765,
   "aliasProvider": "codex",
   "autoReviewModel": "gpt-5.6-terra",
+  "foreignThinking": "carry",
   "codex": {
     "originator": "claude-code-proxy",
     "userAgent": "claude-code-proxy/0.1.24",
@@ -39,6 +40,17 @@ These settings configure the proxy process. Claude Code client settings such as 
   "grok": {
     "baseUrl": "https://cli-chat-proxy.grok.com/v1",
     "clientVersion": "0.2.93"
+  },
+  "deepseek": {
+    "apiKey": "YOUR_DEEPSEEK_API_KEY",
+    "baseUrl": "https://api.deepseek.com/anthropic",
+    "models": ["deepseek-flash", "deepseek-v4-pro"],
+    "aliases": {
+      "deepseek-flash": "deepseek-flash",
+      "deepseek-v4-pro": "deepseek-v4-pro",
+      "ds-flash": "deepseek-flash",
+      "ds-v4-pro": "deepseek-v4-pro"
+    }
   },
   "opencode": {
     "apiKey": "YOUR_OPENCODE_GO_API_KEY",
@@ -65,8 +77,9 @@ All keys are optional. An unreadable file, malformed JSON, or incompatible field
 | `CCP_BIND_ADDRESS` | `bindAddress` | `127.0.0.1` | Listener IP address. |
 | `PORT` | `port` | `18765` | Listener port. |
 | `CCP_CONFIG_DIR` | none | Platform config directory | Replaces the configuration and file-backed auth root. |
-| `CCP_ALIAS_PROVIDER` | `aliasProvider` | `codex` | Routes recognized Anthropic-style aliases through `codex` or `kimi`. |
+| `CCP_ALIAS_PROVIDER` | `aliasProvider` | `codex` | Routes recognized Anthropic-style aliases through `codex` or `kimi`; `anthropic` enables [native Anthropic passthrough](/providers/anthropic/). |
 | `CCP_AUTO_REVIEW_MODEL` | `autoReviewModel` | `gpt-6-luna` for Codex | Routes Claude Code's non-streaming, tool-free Bash security-review classifier through a registered model. |
+| `CCP_FOREIGN_THINKING` | `foreignThinking` | `carry` | `carry` replays another provider's reasoning summary as `<previous_reasoning>` text after a model switch; `drop` omits it. Reasoning a provider can replay natively is unaffected. |
 | `CCP_LOG_STDERR` | `log.stderr` | `false` | Mirrors logs to stderr when present in the environment, regardless of its value. |
 | `CCP_LOG_VERBOSE` | `log.verbose` | `false` | Preserves full string fields in structured logs when present, regardless of its value. |
 | `CCP_TRAFFIC_LOG` | none | `false` | Enables full request captures for `1`, `true`, or `yes`. |
@@ -137,6 +150,16 @@ Proxy URLs may use `http`, `https`, `socks4`, `socks4a`, `socks5`, or `socks5h`.
 | `CCP_GROK_TOOL_IMAGE` | none | `omit` | Selects `omit`, `reattach`, `inline`, or `reject` image handling. |
 | `CCP_GROK_HOSTED_SEARCH` | none | off | Set to `1`, `on`, or `true` to let hosted search tools replace the caller's own search tools and force them on an explicit search turn. |
 | `CCP_GROK_SEARCH_BLOCKS` | none | `text` | Selects how a hosted search is reported: `text` for a text block, `native` for `server_tool_use` plus a `*_tool_result` block. |
+
+## DeepSeek
+
+| Environment | Config key | Default | Purpose |
+| --- | --- | --- | --- |
+| `CCP_DEEPSEEK_API_KEY` | `deepseek.apiKey` | unset | DeepSeek API key; takes precedence over `DEEPSEEK_API_KEY` and config. |
+| `DEEPSEEK_API_KEY` | `deepseek.apiKey` | unset | Fallback API-key variable accepted when the CCP-specific variable is unset. |
+| `CCP_DEEPSEEK_BASE_URL` | `deepseek.baseUrl` | `https://api.deepseek.com/anthropic` | Changes the DeepSeek Anthropic-compatible API base URL. |
+| none | `deepseek.models` | `deepseek-flash`, `deepseek-v4-pro` | Replaces the upstream IDs advertised under the `deepseek/` prefix. |
+| none | `deepseek.aliases` | empty | Maps local model IDs to entries in `deepseek.models`. |
 
 ## OpenCode Go
 

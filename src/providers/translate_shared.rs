@@ -1,6 +1,88 @@
+use base64::Engine;
 use serde_json::Value;
 
 use crate::anthropic::schema::MessagesRequest;
+use crate::config;
+
+pub(crate) fn previous_reasoning_text(reasoning: &str) -> String {
+    format!("<previous_reasoning>\n{reasoning}\n</previous_reasoning>")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForeignReasoning {
+    Carry,
+    Drop,
+}
+
+impl ForeignReasoning {
+    pub fn carries(&self) -> bool {
+        matches!(self, Self::Carry)
+    }
+}
+
+pub fn foreign_reasoning() -> ForeignReasoning {
+    parse_foreign_reasoning(config::foreign_thinking().as_deref())
+}
+
+pub fn reasoning_signature_owner(signature: &str) -> Option<String> {
+    owner_of(signature).or_else(|| {
+        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(signature)
+            .ok()?;
+        owner_of(std::str::from_utf8(&decoded).ok()?)
+    })
+}
+
+fn owner_of(signature: &str) -> Option<String> {
+    let owner = signature.strip_prefix("ccp:")?.split(':').next()?;
+    (!owner.is_empty()).then(|| owner.to_string())
+}
+
+pub(crate) fn parse_foreign_reasoning(raw: Option<&str>) -> ForeignReasoning {
+    match raw.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("drop") => ForeignReasoning::Drop,
+        _ => ForeignReasoning::Carry,
+    }
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn only_drop_turns_the_policy_off() {
+        for raw in [None, Some("carry"), Some(""), Some("nonsense")] {
+            assert_eq!(parse_foreign_reasoning(raw), ForeignReasoning::Carry);
+        }
+        assert_eq!(
+            parse_foreign_reasoning(Some(" DROP ")),
+            ForeignReasoning::Drop
+        );
+    }
+
+    #[test]
+    fn signature_owner_reads_raw_and_encoded_forms() {
+        assert_eq!(
+            reasoning_signature_owner("ccp:codex:v1:cnNfMQ:blob").as_deref(),
+            Some("codex")
+        );
+        assert_eq!(
+            reasoning_signature_owner("Y2NwOmtpbWk6djE6bXNnXzE6Mg").as_deref(),
+            Some("kimi")
+        );
+        assert_eq!(
+            reasoning_signature_owner("Y2NwOm9wZW5jb2RlOnYxOm1zZ18xOjA").as_deref(),
+            Some("opencode")
+        );
+    }
+
+    #[test]
+    fn native_and_empty_signatures_have_no_owner() {
+        for signature in ["", "CAISnBEKpgEIERgC", "ccp:", "opaque"] {
+            assert_eq!(reasoning_signature_owner(signature), None);
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum ContentBlock {

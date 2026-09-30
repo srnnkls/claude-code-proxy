@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -7,6 +7,7 @@ use crate::paths;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AliasProvider {
+    Anthropic,
     Codex,
     Kimi,
 }
@@ -14,6 +15,7 @@ pub enum AliasProvider {
 impl AliasProvider {
     pub fn as_str(&self) -> &str {
         match self {
+            AliasProvider::Anthropic => "anthropic",
             AliasProvider::Codex => "codex",
             AliasProvider::Kimi => "kimi",
         }
@@ -39,12 +41,15 @@ struct FileConfig {
     pub alias_provider: Option<String>,
     #[serde(rename = "autoReviewModel")]
     pub auto_review_model: Option<String>,
+    #[serde(rename = "foreignThinking")]
+    pub foreign_thinking: Option<String>,
     pub log: Option<FileLog>,
     pub kimi: Option<KimiConfig>,
     pub codex: Option<CodexConfig>,
     pub cursor: Option<CursorConfig>,
     pub grok: Option<GrokConfig>,
     pub opencode: Option<OpenCodeConfig>,
+    pub deepseek: Option<DeepSeekConfig>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -116,6 +121,16 @@ struct OpenCodeConfig {
     pub base_url: Option<String>,
 }
 
+#[derive(Deserialize, Clone)]
+struct DeepSeekConfig {
+    #[serde(rename = "apiKey")]
+    pub api_key: Option<String>,
+    #[serde(rename = "baseUrl")]
+    pub base_url: Option<String>,
+    pub models: Option<Vec<String>>,
+    pub aliases: Option<BTreeMap<String, String>>,
+}
+
 #[derive(Deserialize)]
 struct FileLog {
     pub verbose: Option<bool>,
@@ -124,6 +139,7 @@ struct FileLog {
 
 fn parse_alias(raw: &str) -> Option<AliasProvider> {
     match raw {
+        "anthropic" => Some(AliasProvider::Anthropic),
         "codex" => Some(AliasProvider::Codex),
         "kimi" => Some(AliasProvider::Kimi),
         _ => None,
@@ -232,6 +248,19 @@ pub fn alias_provider() -> AliasProvider {
     load_config().alias_provider
 }
 
+pub fn foreign_thinking() -> Option<String> {
+    let env: HashMap<_, _> = std::env::vars().collect();
+    if let Some(raw) = env
+        .get("CCP_FOREIGN_THINKING")
+        .filter(|raw| !raw.is_empty())
+    {
+        return Some(raw.clone());
+    }
+    read_file_config(&paths::config_dir())?
+        .foreign_thinking
+        .filter(|raw| !raw.is_empty())
+}
+
 pub fn log_verbose() -> bool {
     load_config().log_verbose
 }
@@ -300,6 +329,14 @@ pub fn config_override_summary_lines(cfg: &LoadedConfig) -> Vec<String> {
     if env.contains_key("CCP_OPENCODE_BASE_URL") {
         out.push("opencode.baseUrl (env)".to_string());
     }
+    if env.contains_key("CCP_DEEPSEEK_API_KEY") {
+        out.push("deepseek.apiKey (env)".to_string());
+    } else if env.contains_key("DEEPSEEK_API_KEY") {
+        out.push("deepseek.apiKey (DeepSeek env)".to_string());
+    }
+    if env.contains_key("CCP_DEEPSEEK_BASE_URL") {
+        out.push("deepseek.baseUrl (env)".to_string());
+    }
     if env
         .get("CCP_CODEX_REASONING_SUMMARY")
         .is_some_and(|raw| !raw.is_empty())
@@ -345,6 +382,20 @@ pub fn config_override_summary_lines(cfg: &LoadedConfig) -> Vec<String> {
             }
             if let Some(url) = opencode.base_url.filter(|raw| !raw.is_empty()) {
                 out.push(format!("opencode.baseUrl: {url}"));
+            }
+        }
+        if let Some(deepseek) = file_cfg.deepseek {
+            if deepseek.api_key.is_some_and(|raw| !raw.is_empty()) {
+                out.push("deepseek.apiKey (config)".to_string());
+            }
+            if let Some(url) = deepseek.base_url.filter(|raw| !raw.is_empty()) {
+                out.push(format!("deepseek.baseUrl: {url}"));
+            }
+            if deepseek.models.is_some_and(|models| !models.is_empty()) {
+                out.push("deepseek.models (config)".to_string());
+            }
+            if deepseek.aliases.is_some_and(|aliases| !aliases.is_empty()) {
+                out.push("deepseek.aliases (config)".to_string());
             }
         }
         if let Some(codex) = file_cfg.codex {
@@ -574,6 +625,108 @@ pub fn opencode_api_key_source() -> Option<&'static str> {
 pub fn opencode_base_url() -> String {
     let env: HashMap<_, _> = std::env::vars().collect();
     resolve_opencode_config(&env, &paths::config_dir()).base_url
+}
+
+const DEFAULT_DEEPSEEK_MODELS: &[&str] = &["deepseek-flash", "deepseek-v4-pro"];
+
+struct ResolvedDeepSeekConfig {
+    api_key: Option<String>,
+    api_key_source: Option<&'static str>,
+    base_url: String,
+    models: Vec<String>,
+    aliases: BTreeMap<String, String>,
+}
+
+fn resolve_deepseek_config(
+    env: &HashMap<String, String>,
+    config_dir: &Path,
+) -> ResolvedDeepSeekConfig {
+    let file = read_file_config(config_dir).and_then(|file| file.deepseek);
+    let file_key = file
+        .as_ref()
+        .and_then(|config| config.api_key.as_ref())
+        .filter(|value| !value.is_empty());
+    let (api_key, api_key_source) = if let Some(value) = env
+        .get("CCP_DEEPSEEK_API_KEY")
+        .filter(|value| !value.is_empty())
+    {
+        (Some(value.clone()), Some("CCP_DEEPSEEK_API_KEY"))
+    } else if let Some(value) = env
+        .get("DEEPSEEK_API_KEY")
+        .filter(|value| !value.is_empty())
+    {
+        (Some(value.clone()), Some("DEEPSEEK_API_KEY"))
+    } else if let Some(value) = file_key {
+        (Some(value.clone()), Some("config.json"))
+    } else {
+        (None, None)
+    };
+    let base_url = env
+        .get("CCP_DEEPSEEK_BASE_URL")
+        .filter(|value| !value.is_empty())
+        .cloned()
+        .or_else(|| {
+            file.as_ref()
+                .and_then(|config| config.base_url.as_ref())
+                .filter(|value| !value.is_empty())
+                .cloned()
+        })
+        .unwrap_or_else(|| "https://api.deepseek.com/anthropic".to_string());
+    let models = file
+        .as_ref()
+        .and_then(|config| config.models.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|model| !model.is_empty())
+        .collect::<Vec<_>>();
+    let models = if models.is_empty() {
+        DEFAULT_DEEPSEEK_MODELS
+            .iter()
+            .map(|model| (*model).to_string())
+            .collect()
+    } else {
+        models
+    };
+    let aliases = file
+        .as_ref()
+        .and_then(|config| config.aliases.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(alias, target)| !alias.is_empty() && !target.is_empty())
+        .collect();
+
+    ResolvedDeepSeekConfig {
+        api_key,
+        api_key_source,
+        base_url,
+        models,
+        aliases,
+    }
+}
+
+pub fn deepseek_api_key() -> Option<String> {
+    let env: HashMap<_, _> = std::env::vars().collect();
+    resolve_deepseek_config(&env, &paths::config_dir()).api_key
+}
+
+pub fn deepseek_api_key_source() -> Option<&'static str> {
+    let env: HashMap<_, _> = std::env::vars().collect();
+    resolve_deepseek_config(&env, &paths::config_dir()).api_key_source
+}
+
+pub fn deepseek_base_url() -> String {
+    let env: HashMap<_, _> = std::env::vars().collect();
+    resolve_deepseek_config(&env, &paths::config_dir()).base_url
+}
+
+pub fn deepseek_models() -> Vec<String> {
+    let env: HashMap<_, _> = std::env::vars().collect();
+    resolve_deepseek_config(&env, &paths::config_dir()).models
+}
+
+pub fn deepseek_aliases() -> BTreeMap<String, String> {
+    let env: HashMap<_, _> = std::env::vars().collect();
+    resolve_deepseek_config(&env, &paths::config_dir()).aliases
 }
 
 pub fn is_verbose() -> bool {
@@ -1069,6 +1222,50 @@ mod tests {
         assert_eq!(resolved.api_key.as_deref(), Some("ccp-key"));
         assert_eq!(resolved.api_key_source, Some("CCP_OPENCODE_API_KEY"));
         assert_eq!(resolved.base_url, "https://env.example/v1");
+    }
+
+    #[test]
+    fn deepseek_config_reads_models_and_env_precedence() {
+        let config = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            config.path().join("config.json"),
+            r#"{"deepseek":{"apiKey":"file-key","baseUrl":"https://file.example/anthropic","models":["deepseek-custom"],"aliases":{"ds-custom":"deepseek-custom"}}}"#,
+        )
+        .unwrap();
+        let mut env = HashMap::new();
+        let resolved = resolve_deepseek_config(&env, config.path());
+        assert_eq!(resolved.api_key.as_deref(), Some("file-key"));
+        assert_eq!(resolved.api_key_source, Some("config.json"));
+        assert_eq!(resolved.base_url, "https://file.example/anthropic");
+        assert_eq!(resolved.models, ["deepseek-custom"]);
+        assert_eq!(
+            resolved.aliases.get("ds-custom").map(String::as_str),
+            Some("deepseek-custom")
+        );
+
+        env.insert("DEEPSEEK_API_KEY".into(), "standard-key".into());
+        let resolved = resolve_deepseek_config(&env, config.path());
+        assert_eq!(resolved.api_key.as_deref(), Some("standard-key"));
+        assert_eq!(resolved.api_key_source, Some("DEEPSEEK_API_KEY"));
+
+        env.insert("CCP_DEEPSEEK_API_KEY".into(), "ccp-key".into());
+        env.insert(
+            "CCP_DEEPSEEK_BASE_URL".into(),
+            "https://env.example/anthropic".into(),
+        );
+        let resolved = resolve_deepseek_config(&env, config.path());
+        assert_eq!(resolved.api_key.as_deref(), Some("ccp-key"));
+        assert_eq!(resolved.api_key_source, Some("CCP_DEEPSEEK_API_KEY"));
+        assert_eq!(resolved.base_url, "https://env.example/anthropic");
+    }
+
+    #[test]
+    fn deepseek_config_defaults_models_and_base_url() {
+        let config = tempfile::TempDir::new().unwrap();
+        let resolved = resolve_deepseek_config(&HashMap::new(), config.path());
+        assert_eq!(resolved.base_url, "https://api.deepseek.com/anthropic");
+        assert_eq!(resolved.models, ["deepseek-flash", "deepseek-v4-pro"]);
+        assert!(resolved.aliases.is_empty());
     }
 
     #[test]

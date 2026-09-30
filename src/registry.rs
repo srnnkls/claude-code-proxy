@@ -67,12 +67,25 @@ pub struct Registry {
 impl Registry {
     pub fn new(alias_provider: AliasProvider) -> Self {
         let mut models: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        if alias_provider == AliasProvider::Anthropic {
+            models.insert(
+                "anthropic".into(),
+                ANTHROPIC_STYLE_ALIASES
+                    .iter()
+                    .map(|model| (*model).to_string())
+                    .collect(),
+            );
+        }
         models.insert("codex".into(), expand_codex_models());
         models.insert(
             "kimi".into(),
             KIMI_MODELS.iter().map(|m| (*m).to_string()).collect(),
         );
         models.insert("cursor".into(), build_cursor_models());
+        models.insert(
+            "deepseek".into(),
+            crate::providers::deepseek::model::advertised_models(),
+        );
         models.insert(
             "grok".into(),
             GROK_MODELS
@@ -84,13 +97,16 @@ impl Registry {
             "opencode".into(),
             crate::providers::opencode::advertised_models(),
         );
+        remove_shadowed_models(&mut models);
 
         let mut handlers = BTreeMap::new();
         for (name, entries) in &models {
             let handler: Arc<dyn Provider> = match name.as_str() {
+                "anthropic" => Arc::new(crate::providers::anthropic::AnthropicProvider::new()),
                 "codex" => Arc::new(crate::providers::codex::CodexProvider::new()),
                 "kimi" => Arc::new(crate::providers::kimi::KimiProvider::new()),
                 "cursor" => Arc::new(crate::providers::cursor::CursorProvider::new()),
+                "deepseek" => Arc::new(crate::providers::deepseek::DeepSeekProvider::new()),
                 "grok" => Arc::new(crate::providers::grok::GrokProvider::new()),
                 "opencode" => Arc::new(crate::providers::opencode::OpenCodeProvider::new()),
                 _ => Arc::new(PlaceholderProvider::new(name, entries.clone())),
@@ -174,6 +190,12 @@ impl Registry {
         session_affinity: Option<&AliasProvider>,
     ) -> Option<Arc<dyn Provider>> {
         let normalized = normalize_incoming_model(raw_model);
+        // Explicit Claude selection must survive a preceding Codex/Kimi turn.
+        if self.alias_provider == AliasProvider::Anthropic
+            && (is_anthropic_alias(&normalized) || normalized.starts_with("claude-"))
+        {
+            return self.handlers.get("anthropic").cloned();
+        }
         if is_anthropic_alias(&normalized) {
             let target = session_affinity.unwrap_or(&self.alias_provider);
             return self.handlers.get(target.as_str()).cloned();
@@ -235,6 +257,7 @@ impl PlaceholderProvider {
             "codex" => "codex",
             "kimi" => "kimi",
             "cursor" => "cursor",
+            "deepseek" => "deepseek",
             "grok" => "grok",
             _ => "codex",
         };
@@ -257,6 +280,7 @@ impl Provider for PlaceholderProvider {
             "codex" => &CODEX_CLI,
             "kimi" => &KIMI_CLI,
             "cursor" => &CURSOR_CLI,
+            "deepseek" => &DEEPSEEK_CLI,
             "grok" => &GROK_CLI,
             _ => &CODEX_CLI,
         }
@@ -316,7 +340,18 @@ impl CliHandlers for PlaceholderCli {
 const CODEX_CLI: PlaceholderCli = PlaceholderCli { provider: "codex" };
 const KIMI_CLI: PlaceholderCli = PlaceholderCli { provider: "kimi" };
 const CURSOR_CLI: PlaceholderCli = PlaceholderCli { provider: "cursor" };
+const DEEPSEEK_CLI: PlaceholderCli = PlaceholderCli {
+    provider: "deepseek",
+};
 const GROK_CLI: PlaceholderCli = PlaceholderCli { provider: "grok" };
+
+fn remove_shadowed_models(models: &mut BTreeMap<String, Vec<String>>) {
+    let mut claimed = HashSet::new();
+    for entries in models.values_mut() {
+        entries.retain(|model| claimed.insert(model.clone()));
+    }
+}
+
 fn expand_codex_models() -> Vec<String> {
     let mut set = HashSet::new();
     let mut out = Vec::new();
@@ -345,6 +380,59 @@ fn build_cursor_models() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anthropic_routing_is_opt_in_and_ignores_other_provider_affinity() {
+        let native = Registry::new(AliasProvider::Anthropic);
+        let default = Registry::new(AliasProvider::Codex);
+        for model in ["haiku", "opus", "claude-opus-5", "claude-future-model[1m]"] {
+            assert_eq!(
+                native
+                    .provider_for_model(model, Some(&AliasProvider::Codex))
+                    .unwrap()
+                    .name(),
+                "anthropic"
+            );
+            assert_eq!(
+                native
+                    .provider_for_model(model, Some(&AliasProvider::Kimi))
+                    .unwrap()
+                    .name(),
+                "anthropic"
+            );
+        }
+        assert_eq!(
+            native
+                .provider_for_model("gpt-6-astra", None)
+                .unwrap()
+                .name(),
+            "codex"
+        );
+        assert_eq!(
+            native.provider_for_model("kimi-k3", None).unwrap().name(),
+            "kimi"
+        );
+        assert!(native.provider_for_model("unknown", None).is_none());
+        assert!(default.provider("anthropic").is_none());
+        assert!(
+            default
+                .provider_for_model("claude-future-model", None)
+                .is_none()
+        );
+        assert_eq!(
+            default
+                .provider_for_model("opus", Some(&AliasProvider::Kimi))
+                .unwrap()
+                .name(),
+            "kimi"
+        );
+        assert!(
+            native
+                .all_supported_models()
+                .iter()
+                .any(|(model, provider)| model == "claude-opus-5" && provider == "anthropic")
+        );
+    }
 
     #[test]
     fn normalize_model_trims_hint() {
@@ -481,5 +569,83 @@ mod tests {
                 "opencode"
             );
         }
+    }
+
+    #[test]
+    fn deepseek_prefix_routes_direct_without_stealing_opencode_ids() {
+        let mut registry = Registry::new(AliasProvider::Codex);
+        registry.models.insert(
+            "deepseek".to_string(),
+            vec![
+                "deepseek/deepseek-flash".to_string(),
+                "deepseek/deepseek-v4-pro".to_string(),
+            ],
+        );
+        registry.models.insert(
+            "opencode".to_string(),
+            vec![
+                "deepseek-flash".to_string(),
+                "deepseek-v4-pro".to_string(),
+                "opencode-go/deepseek-flash".to_string(),
+                "opencode-go/deepseek-v4-pro".to_string(),
+            ],
+        );
+        remove_shadowed_models(&mut registry.models);
+        for model in ["deepseek-flash", "deepseek-v4-pro"] {
+            assert_eq!(
+                registry.provider_for_model(model, None).unwrap().name(),
+                "opencode"
+            );
+            assert_eq!(
+                registry
+                    .provider_for_model(&format!("deepseek/{model}"), None)
+                    .unwrap()
+                    .name(),
+                "deepseek"
+            );
+            assert_eq!(
+                registry
+                    .provider_for_model(&format!("opencode-go/{model}"), None)
+                    .unwrap()
+                    .name(),
+                "opencode"
+            );
+        }
+    }
+
+    #[test]
+    fn deepseek_aliases_can_claim_bare_ids_without_removing_opencode_overrides() {
+        let mut registry = Registry::new(AliasProvider::Codex);
+        registry.models.insert(
+            "deepseek".to_string(),
+            vec!["deepseek-flash".to_string(), "ds-flash".to_string()],
+        );
+        remove_shadowed_models(&mut registry.models);
+        assert_eq!(
+            registry
+                .provider_for_model("deepseek-flash", None)
+                .unwrap()
+                .name(),
+            "deepseek"
+        );
+        assert_eq!(
+            registry
+                .provider_for_model("ds-flash", None)
+                .unwrap()
+                .name(),
+            "deepseek"
+        );
+        assert_eq!(
+            registry
+                .provider_for_model("opencode-go/deepseek-flash", None)
+                .unwrap()
+                .name(),
+            "opencode"
+        );
+        assert!(
+            !registry
+                .supported_models_for("opencode")
+                .contains(&"deepseek-flash".to_string())
+        );
     }
 }
