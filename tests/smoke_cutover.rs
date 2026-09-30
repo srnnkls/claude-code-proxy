@@ -3380,7 +3380,8 @@ fn handback_messages_body(stream: bool) -> Value {
                 "type":"tool_result",
                 "tool_use_id":"toolu_handback",
                 "content":"delivered"
-            }]}
+            }]},
+            {"role":"system","content":[{"type":"text","text":"idle"}]}
         ]
     })
 }
