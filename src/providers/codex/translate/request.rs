@@ -367,7 +367,12 @@ fn block_str<'a>(block: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 pub(crate) fn is_final_turn_request(request: &MessagesRequest) -> bool {
-    let [.., assistant, user] = request.messages.as_slice() else {
+    let mut turns = request
+        .messages
+        .iter()
+        .rev()
+        .filter(|message| message.role != "system");
+    let (Some(user), Some(assistant)) = (turns.next(), turns.next()) else {
         return false;
     };
     if assistant.role != "assistant" || user.role != "user" {
@@ -1955,6 +1960,25 @@ mod tests {
                     {"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"},
                     {"type": "text", "text": "<system-reminder>idle</system-reminder>"}
                 ]}
+            ]
+        }))
+        .unwrap();
+
+        assert!(is_final_turn_request(&req));
+    }
+
+    #[test]
+    fn trailing_system_message_after_handback_result_keeps_the_turn_final() {
+        let req: MessagesRequest = serde_json::from_value(json!({
+            "model": "gpt-5.6-sol",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "toolu_1", "name": "SubagentHandback", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"}
+                ]},
+                {"role": "system", "content": [{"type": "text", "text": "idle"}]}
             ]
         }))
         .unwrap();
